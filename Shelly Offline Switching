@@ -1,0 +1,39 @@
+// DEVICE 1 -> mirrors output to DEVICE 2; paste in both devices visa-versa
+
+let CFG = {
+  REMOTE_IP: "192.168.33.1", //use the IP if the device you want to send the command to 
+  SWITCH_ID: 0
+};
+
+let pendingRemote = null;
+
+function remoteSet(state) {
+  let url = "http://" + CFG.REMOTE_IP +
+            "/rpc/Switch.Set?id=" + CFG.SWITCH_ID +
+            "&on=" + (state ? "true" : "false");
+
+  Shelly.call("HTTP.GET", { url: url }, function (res, err, msg) {
+    if (err !== 0) print("REMOTE SET FAIL:", err, msg);
+  });
+}
+
+Shelly.call("Switch.GetStatus", { id: CFG.SWITCH_ID }, function(res, err, msg){
+  if (err === 0) print("Device 2 start output:", res.output);
+});
+
+Shelly.addStatusHandler(function (ev) {
+  if (!ev || ev.component !== ("switch:" + CFG.SWITCH_ID)) return;
+  if (!ev.delta || typeof ev.delta.output === "undefined") return;
+
+  let newState = ev.delta.output;
+
+  if (pendingRemote !== null && newState === pendingRemote) {
+    pendingRemote = null;
+    return;
+  }
+
+  pendingRemote = newState;
+  print("Device 2 output changed -> setting remote to", newState);
+  remoteSet(newState);
+
+}, null);
