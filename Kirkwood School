@@ -1,0 +1,33 @@
+let url1 = "http://192.168.0.138/rpc/switch.set?id=0&on=false";
+let url2 = "http://192.168.0.138/rpc/switch.set?id=0&on=true";
+
+function runSequence() {
+
+  // Disable Action #2 (ON command blocked)
+  Shelly.call("Action.SetConfig", {
+    id: 2,
+    config: { enabled: false }
+  });
+
+  // Run Action #1 (turn OFF)
+  Shelly.call("HTTP.GET", { url: url1 });
+
+  // After 60 minutes → Enable Action #2 again
+  Timer.set(60 * 60 * 1000, false, function () {
+
+    // Re-enable Action #2
+    Shelly.call("Action.SetConfig", {
+      id: 2,
+      config: { enabled: true }
+    });
+
+    // (Optional) Run Action #2 automatically after 60 min
+    // Uncomment this if you ALSO want it to turn ON automatically:
+    // Shelly.call("HTTP.GET", { url: url2 });
+
+  });
+}
+
+// start it
+runSequence();
+
