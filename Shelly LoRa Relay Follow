@@ -1,0 +1,105 @@
+// Shelly LoRa relay-follow pair (Sender + Receiver)
+//
+// Usage:
+// 1) Paste the SENDER script on the device with the physical relay you want to mirror.
+// 2) Paste the RECEIVER script on the remote Shelly device.
+// 3) Set GROUP_KEY and LORA peer settings to match your environment on both sides.
+//
+// Notes:
+// - This uses a small JSON payload over LoRa.
+// - Sender publishes whenever switch:0 output changes.
+// - Receiver applies state to switch:0.
+
+/* =========================
+   SENDER SCRIPT
+   ========================= */
+
+let SENDER_CFG = {
+  SWITCH_ID: 0,
+  GROUP_KEY: "relay-follow-1", // must match receiver
+  TX_OPTS: {
+    // keep default unless your model/firmware requires explicit params
+    // e.g. destination, spreading factor, etc.
+  }
+};
+
+function senderTxRelayState(on) {
+  let payload = JSON.stringify({
+    k: SENDER_CFG.GROUP_KEY,
+    t: "relay",
+    sid: SENDER_CFG.SWITCH_ID,
+    on: !!on,
+    ts: Shelly.getUptimeMs()
+  });
+
+  Shelly.call("LoRa.Send", {
+    data: payload,
+    options: SENDER_CFG.TX_OPTS
+  }, function (res, err, msg) {
+    if (err !== 0) {
+      print("LoRa.Send failed:", err, msg);
+    } else {
+      print("LoRa TX relay:", payload);
+    }
+  });
+}
+
+// send initial state at boot so receiver syncs immediately
+Shelly.call("Switch.GetStatus", { id: SENDER_CFG.SWITCH_ID }, function (res, err) {
+  if (err === 0 && res) senderTxRelayState(res.output);
+});
+
+Shelly.addStatusHandler(function (ev) {
+  if (!ev || ev.component !== ("switch:" + SENDER_CFG.SWITCH_ID)) return;
+  if (!ev.delta || typeof ev.delta.output === "undefined") return;
+  senderTxRelayState(ev.delta.output);
+});
+
+
+/* =========================
+   RECEIVER SCRIPT
+   ========================= */
+
+let RECEIVER_CFG = {
+  SWITCH_ID: 0,
+  GROUP_KEY: "relay-follow-1" // must match sender
+};
+
+let receiverLastApplied = null;
+
+function receiverApplyRelayState(on) {
+  on = !!on;
+  if (receiverLastApplied === on) return;
+
+  Shelly.call("Switch.Set", {
+    id: RECEIVER_CFG.SWITCH_ID,
+    on: on
+  }, function (res, err, msg) {
+    if (err !== 0) {
+      print("Switch.Set failed:", err, msg);
+      return;
+    }
+    receiverLastApplied = on;
+    print("Relay mirrored to", on);
+  });
+}
+
+Shelly.addEventHandler(function (ev) {
+  // Event name can vary by firmware; check your model logs if needed.
+  // Typical payload example: ev.name === "lora.rx" and ev.info.data contains string.
+  if (!ev || !ev.name || ev.name !== "lora.rx") return;
+  if (!ev.info || typeof ev.info.data !== "string") return;
+
+  let msg;
+  try {
+    msg = JSON.parse(ev.info.data);
+  } catch (e) {
+    return;
+  }
+
+  if (!msg || msg.k !== RECEIVER_CFG.GROUP_KEY) return;
+  if (msg.t !== "relay" || msg.sid !== RECEIVER_CFG.SWITCH_ID) return;
+  if (typeof msg.on === "undefined") return;
+
+  receiverApplyRelayState(msg.on);
+});
